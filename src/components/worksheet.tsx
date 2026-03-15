@@ -280,7 +280,7 @@ export function Worksheet({
                   placeholder={
                     annotation.manualDiagnosis
                       ? "Type a diagnosis"
-                      : "Use “Select from Chart” to capture diagnosis text"
+                      : "Use “Add Diagnosis” to capture diagnosis text"
                   }
                   onChange={(event) =>
                     onUpdateAnnotation(annotation.id, (current) => ({
@@ -300,7 +300,7 @@ export function Worksheet({
                     onClick={() => onStartCapture(annotation.id, "diagnosis")}
                   >
                     <Highlighter className="h-4 w-4" />
-                    Select from Chart
+                    Add Diagnosis
                   </Button>
                   <Button
                     variant={
