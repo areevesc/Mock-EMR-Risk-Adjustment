@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:pages": "tsc -b && vite build --base=/Mock-EMR-Risk-Adjustment/",
     "preview": "vite preview"
   },
   "dependencies": {
