@@ -728,12 +728,12 @@ export default function App() {
         >
           <div className="text-sm font-medium">
             {captureTarget.field === "diagnosis"
-              ? "Select a diagnosis"
+              ? "Add diagnosis"
               : "Add evidence"}
           </div>
           <div className="mt-1 text-xs text-muted-foreground">
             Highlight text in the chart, then tap{" "}
-            {captureTarget.field === "diagnosis" ? "Select Highlight" : "Add Evidence"}.
+            {captureTarget.field === "diagnosis" ? "Add Diagnosis" : "Add Evidence"}.
           </div>
           {activeSelection ? (
             <>
@@ -761,7 +761,7 @@ export default function App() {
               onClick={confirmSelection}
               disabled={!canConfirmSelection}
             >
-              {captureTarget.field === "diagnosis" ? "Select Highlight" : "Add Evidence"}
+              {captureTarget.field === "diagnosis" ? "Add Diagnosis" : "Add Evidence"}
             </Button>
           </div>
         </div>
@@ -772,7 +772,7 @@ export default function App() {
           <div className="flex items-center justify-between gap-3">
             <div className="text-sm">
               {captureTarget.field === "diagnosis"
-                ? "Select a diagnosis - highlight text in the chart"
+                ? "Add diagnosis - highlight text in the chart"
                 : "Add evidence - highlight supporting text in the chart"}
             </div>
             <Button
@@ -812,7 +812,7 @@ export default function App() {
               className="min-h-11 flex-1"
               onClick={confirmSelection}
             >
-              {captureTarget?.field === "diagnosis" ? "Select" : "Add Evidence"}
+              {captureTarget?.field === "diagnosis" ? "Add Diagnosis" : "Add Evidence"}
             </Button>
             <Button variant="outline" className="min-h-11" onClick={clearSelection}>
               Clear
