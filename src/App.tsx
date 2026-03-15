@@ -163,6 +163,11 @@ export default function App() {
     field: CaptureField;
   } | null>(null);
   const [selectionState, setSelectionState] = useState<SelectionState | null>(null);
+  const [recentlyUpdated, setRecentlyUpdated] = useState<{
+    annotationId: string;
+    field: CaptureField;
+    marker: number;
+  } | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchFocus, setSearchFocus] = useState<SearchFocusTarget | null>(null);
   const chartRef = useRef<HTMLDivElement>(null);
@@ -420,8 +425,16 @@ export default function App() {
           };
     });
 
+    setRecentlyUpdated({
+      annotationId: captureTarget.annotationId,
+      field: captureTarget.field,
+      marker: Date.now(),
+    });
     setCaptureTarget(null);
     clearSelection();
+    if (isMobileViewport) {
+      setMobileWorksheetOpen(true);
+    }
   }
 
   function focusSearchResult(result: ChartSearchResult) {
@@ -448,6 +461,7 @@ export default function App() {
     <Worksheet
       annotations={annotations}
       captureTarget={captureTarget}
+      recentlyUpdated={recentlyUpdated}
       onAddAnnotation={() =>
         setAnnotations((current) => [...current, createAnnotation()])
       }

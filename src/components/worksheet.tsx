@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ClipboardCheck,
   FileOutput,
@@ -28,6 +28,11 @@ type CaptureField = "diagnosis" | "evidence";
 interface WorksheetProps {
   annotations: Annotation[];
   captureTarget: { annotationId: string; field: CaptureField } | null;
+  recentlyUpdated: {
+    annotationId: string;
+    field: CaptureField;
+    marker: number;
+  } | null;
   onAddAnnotation: () => void;
   onRemoveAnnotation: (annotationId: string) => void;
   onUpdateAnnotation: (
@@ -64,6 +69,7 @@ const typeClassMap: Record<AnnotationType, string> = {
 export function Worksheet({
   annotations,
   captureTarget,
+  recentlyUpdated,
   onAddAnnotation,
   onRemoveAnnotation,
   onUpdateAnnotation,
@@ -73,6 +79,7 @@ export function Worksheet({
 }: WorksheetProps) {
   const [editingSourceFor, setEditingSourceFor] = useState<string | null>(null);
   const [editingSourceText, setEditingSourceText] = useState("");
+  const annotationRefs = useRef<Record<string, HTMLElement | null>>({});
 
   useEffect(() => {
     if (!editingSourceFor) {
@@ -85,6 +92,18 @@ export function Worksheet({
       setEditingSourceText("");
     }
   }, [annotations, editingSourceFor]);
+
+  useEffect(() => {
+    if (!recentlyUpdated) {
+      return;
+    }
+
+    const target = annotationRefs.current[recentlyUpdated.annotationId];
+    target?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  }, [recentlyUpdated]);
 
   function startEditingSource(annotation: Annotation) {
     if (!annotation.diagnosisSource) {
@@ -177,6 +196,9 @@ export function Worksheet({
         {annotations.map((annotation, index) => (
           <article
             key={annotation.id}
+            ref={(node) => {
+              annotationRefs.current[annotation.id] = node;
+            }}
             className="border-t border-border/70 py-5 first:border-t-0 first:pt-0"
           >
             <div className="flex items-start justify-between gap-3">
@@ -186,6 +208,15 @@ export function Worksheet({
                 </div>
                 <div>
                   <div className="text-sm font-semibold">Annotation {index + 1}</div>
+                  {recentlyUpdated?.annotationId === annotation.id ? (
+                    <div className="text-xs text-primary">
+                      {recentlyUpdated.field === "diagnosis"
+                        ? "Diagnosis captured"
+                        : annotation.evidence.length > 0
+                          ? "Evidence captured"
+                          : "Evidence not captured"}
+                    </div>
+                  ) : null}
                 </div>
               </div>
               <Button
