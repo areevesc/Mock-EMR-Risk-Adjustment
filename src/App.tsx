@@ -168,11 +168,14 @@ export default function App() {
   const chartRef = useRef<HTMLDivElement>(null);
   const isSelectingRef = useRef(false);
   const mobileSelectionTimerRef = useRef<number | null>(null);
+  const selectionSnapshotRef = useRef<SelectionState | null>(null);
   const deferredSearchQuery = useDeferredValue(normalizeSearchQuery(searchQuery));
   const searchResults = buildSearchResults(patient, deferredSearchQuery);
   const visibleSearchResults = searchResults.slice(0, VISIBLE_SEARCH_RESULT_LIMIT);
   const isMobileViewport = typeof window !== "undefined" && window.innerWidth < 640;
   const showDesktopCaptureBanner = Boolean(captureTarget && !isMobileViewport && !selectionState);
+  const activeSelection = selectionState ?? selectionSnapshotRef.current;
+  const canConfirmSelection = Boolean(activeSelection);
 
   function extractSelection() {
     const selection = window.getSelection();
@@ -271,6 +274,7 @@ export default function App() {
   useEffect(() => {
     if (!captureTarget) {
       setSelectionState(null);
+      selectionSnapshotRef.current = null;
       return;
     }
 
@@ -281,6 +285,9 @@ export default function App() {
 
       mobileSelectionTimerRef.current = window.setTimeout(() => {
         const nextSelection = extractSelection();
+        if (nextSelection) {
+          selectionSnapshotRef.current = nextSelection;
+        }
         setSelectionState(nextSelection);
 
         if (!nextSelection && attempts > 1) {
@@ -296,6 +303,7 @@ export default function App() {
       }
       isSelectingRef.current = true;
       setSelectionState(null);
+      selectionSnapshotRef.current = null;
     };
 
     const handleSelectionEnd = () => {
@@ -339,6 +347,7 @@ export default function App() {
 
   function clearSelection() {
     setSelectionState(null);
+    selectionSnapshotRef.current = null;
     window.getSelection()?.removeAllRanges();
   }
 
@@ -379,7 +388,8 @@ export default function App() {
       return;
     }
 
-    const nextSelection = selectionState ?? extractSelection();
+    const nextSelection =
+      selectionState ?? selectionSnapshotRef.current ?? extractSelection();
     if (!nextSelection) {
       return;
     }
@@ -711,13 +721,13 @@ export default function App() {
             Highlight text in the chart, then tap{" "}
             {captureTarget.field === "diagnosis" ? "Select Highlight" : "Add Evidence"}.
           </div>
-          {selectionState ? (
+          {activeSelection ? (
             <>
               <div className="mt-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                {selectionState.sourceLabel}
+                {activeSelection.sourceLabel}
               </div>
               <div className="mt-2 max-h-16 overflow-hidden text-sm leading-5">
-                {selectionState.text}
+                {activeSelection.text}
               </div>
             </>
           ) : null}
@@ -732,7 +742,11 @@ export default function App() {
             >
               Cancel
             </Button>
-            <Button className="min-h-11 flex-1" onClick={confirmSelection}>
+            <Button
+              className="min-h-11 flex-1"
+              onClick={confirmSelection}
+              disabled={!canConfirmSelection}
+            >
               {captureTarget.field === "diagnosis" ? "Select Highlight" : "Add Evidence"}
             </Button>
           </div>

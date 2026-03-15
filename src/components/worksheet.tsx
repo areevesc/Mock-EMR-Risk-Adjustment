@@ -186,9 +186,6 @@ export function Worksheet({
                 </div>
                 <div>
                   <div className="text-sm font-semibold">Annotation {index + 1}</div>
-                  <div className="text-xs text-muted-foreground">
-                    Evidence snippets: {annotation.evidence.length}
-                  </div>
                 </div>
               </div>
               <Button
