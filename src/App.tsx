@@ -1,13 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { startTransition, useDeferredValue, useEffect, useRef, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
   Moon,
   RefreshCw,
+  Search,
   SunMedium,
 } from "lucide-react";
 import { ChartSections } from "@/components/chart-sections";
+import { HighlightedText } from "@/components/highlighted-text";
 import { Worksheet } from "@/components/worksheet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,20 +19,25 @@ import {
   DrawerTitle,
   DrawerTrigger,
 } from "@/components/ui/drawer";
+import { Input } from "@/components/ui/input";
+import {
+  buildSearchResults,
+  normalizeSearchQuery,
+  type ChartSearchResult,
+  type SearchFocusTarget,
+} from "@/lib/chart-search";
 import { generatePatient } from "@/lib/generatePatient";
 import { printPatientChart } from "@/lib/print";
 import { cn } from "@/lib/utils";
-import type { Annotation, EvidenceSnippet, Patient, SourceTab } from "@/types/patient";
+import type {
+  Annotation,
+  ChartTabValue,
+  EvidenceSnippet,
+  Patient,
+  SourceTab,
+} from "@/types/patient";
 
 type Theme = "light" | "dark";
-type TabValue =
-  | "encounters"
-  | "problem-list"
-  | "pmh"
-  | "medications"
-  | "labs"
-  | "vitals"
-  | "imaging";
 type CaptureField = "diagnosis" | "evidence";
 
 interface SelectionState {
@@ -42,6 +49,27 @@ interface SelectionState {
   sourceKey: string;
   sourceLabel: string;
 }
+
+interface PersistedSession {
+  version: 1;
+  patient: Patient;
+  annotations: Annotation[];
+  activeTab: ChartTabValue;
+}
+
+const THEME_STORAGE_KEY = "emr-theme";
+const SESSION_STORAGE_KEY = "mock-emr-session-v1";
+const DEFAULT_TAB: ChartTabValue = "encounters";
+const VISIBLE_SEARCH_RESULT_LIMIT = 12;
+const chartTabs: ChartTabValue[] = [
+  "encounters",
+  "problem-list",
+  "pmh",
+  "medications",
+  "labs",
+  "vitals",
+  "imaging",
+];
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en-US", {
@@ -55,11 +83,59 @@ function initialTheme(): Theme {
   if (typeof window === "undefined") {
     return "light";
   }
-  const stored = window.localStorage.getItem("emr-theme");
+  const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
   if (stored === "light" || stored === "dark") {
     return stored;
   }
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function isChartTabValue(value: unknown): value is ChartTabValue {
+  return chartTabs.includes(value as ChartTabValue);
+}
+
+function loadPersistedSession() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(SESSION_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw) as Partial<PersistedSession>;
+    if (
+      parsed.version !== 1 ||
+      !parsed.patient ||
+      typeof parsed.patient.id !== "string" ||
+      !Array.isArray(parsed.annotations) ||
+      !isChartTabValue(parsed.activeTab)
+    ) {
+      window.localStorage.removeItem(SESSION_STORAGE_KEY);
+      return null;
+    }
+
+    return parsed as PersistedSession;
+  } catch {
+    window.localStorage.removeItem(SESSION_STORAGE_KEY);
+    return null;
+  }
+}
+
+function initialAppState(): PersistedSession {
+  const persisted = loadPersistedSession();
+  if (persisted) {
+    return persisted;
+  }
+
+  return {
+    version: 1,
+    patient: generatePatient(),
+    annotations: [],
+    activeTab: DEFAULT_TAB,
+  };
 }
 
 function createAnnotation(): Annotation {
@@ -75,9 +151,10 @@ function createAnnotation(): Annotation {
 }
 
 export default function App() {
-  const [patient, setPatient] = useState<Patient>(() => generatePatient());
-  const [activeTab, setActiveTab] = useState<TabValue>("encounters");
-  const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const [initialState] = useState(initialAppState);
+  const [patient, setPatient] = useState<Patient>(initialState.patient);
+  const [activeTab, setActiveTab] = useState<ChartTabValue>(initialState.activeTab);
+  const [annotations, setAnnotations] = useState<Annotation[]>(initialState.annotations);
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const [worksheetCollapsed, setWorksheetCollapsed] = useState(false);
   const [mobileWorksheetOpen, setMobileWorksheetOpen] = useState(false);
@@ -86,14 +163,55 @@ export default function App() {
     field: CaptureField;
   } | null>(null);
   const [selectionState, setSelectionState] = useState<SelectionState | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchFocus, setSearchFocus] = useState<SearchFocusTarget | null>(null);
   const chartRef = useRef<HTMLDivElement>(null);
   const isSelectingRef = useRef(false);
   const mobileSelectionTimerRef = useRef<number | null>(null);
+  const deferredSearchQuery = useDeferredValue(normalizeSearchQuery(searchQuery));
+  const searchResults = buildSearchResults(patient, deferredSearchQuery);
+  const visibleSearchResults = searchResults.slice(0, VISIBLE_SEARCH_RESULT_LIMIT);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
-    window.localStorage.setItem("emr-theme", theme);
+    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
   }, [theme]);
+
+  useEffect(() => {
+    try {
+      const session: PersistedSession = {
+        version: 1,
+        patient,
+        annotations,
+        activeTab,
+      };
+      window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+    } catch {
+      // Ignore storage write failures and continue with in-memory state.
+    }
+  }, [activeTab, annotations, patient]);
+
+  useEffect(() => {
+    if (!deferredSearchQuery) {
+      setSearchFocus(null);
+      return;
+    }
+
+    setSearchFocus((current) => {
+      if (!current) {
+        return null;
+      }
+
+      const stillVisible = searchResults.some(
+        (result) =>
+          result.tab === current.tab &&
+          result.sourceType === current.sourceType &&
+          result.sourceKey === current.sourceKey,
+      );
+
+      return stillVisible ? current : null;
+    });
+  }, [deferredSearchQuery, searchResults]);
 
   useEffect(() => {
     if (!captureTarget) {
@@ -220,8 +338,10 @@ export default function App() {
   function resetChart() {
     setPatient(generatePatient());
     setAnnotations([]);
-    setActiveTab("encounters");
+    setActiveTab(DEFAULT_TAB);
     setCaptureTarget(null);
+    setSearchQuery("");
+    setSearchFocus(null);
     clearSelection();
   }
 
@@ -280,6 +400,19 @@ export default function App() {
 
     setCaptureTarget(null);
     clearSelection();
+  }
+
+  function focusSearchResult(result: ChartSearchResult) {
+    startTransition(() => {
+      setActiveTab(result.tab);
+      setSearchFocus({
+        marker: Date.now(),
+        resultId: result.id,
+        tab: result.tab,
+        sourceType: result.sourceType,
+        sourceKey: result.sourceKey,
+      });
+    });
   }
 
   function removeEvidence(annotationId: string, evidenceId: string) {
@@ -425,11 +558,128 @@ export default function App() {
         </header>
 
         <section className="px-4 py-4 sm:px-6 sm:py-6">
+          <div className="mb-6 rounded-[24px] border border-border/70 bg-background/70 p-4 shadow-sm">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+              <div className="space-y-1">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                  Chart Search
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Find terms across encounters, problems, medications, labs,
+                  vitals, and imaging.
+                </p>
+              </div>
+
+              <div className="w-full max-w-xl">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    placeholder="Search the full chart"
+                    className="pl-9 pr-20"
+                  />
+                  {searchQuery ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="absolute right-1 top-1/2 h-8 -translate-y-1/2"
+                      onClick={() => {
+                        setSearchQuery("");
+                        setSearchFocus(null);
+                      }}
+                    >
+                      Clear
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+
+            {deferredSearchQuery ? (
+              <div className="mt-4 border-t border-border/60 pt-4">
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <Badge variant="secondary">
+                    {searchResults.length} match{searchResults.length === 1 ? "" : "es"}
+                  </Badge>
+                  <span className="text-muted-foreground">
+                    Searching for{" "}
+                    <span className="font-medium text-foreground">
+                      <HighlightedText
+                        text={deferredSearchQuery}
+                        query={deferredSearchQuery}
+                      />
+                    </span>
+                  </span>
+                </div>
+
+                {visibleSearchResults.length > 0 ? (
+                  <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                    {visibleSearchResults.map((result) => {
+                      const focused = searchFocus?.resultId === result.id;
+
+                      return (
+                        <button
+                          key={result.id}
+                          type="button"
+                          className={cn(
+                            "rounded-2xl border border-border/70 bg-card px-4 py-3 text-left transition-colors hover:border-primary/40 hover:bg-primary/5",
+                            focused && "border-primary/50 bg-primary/5",
+                          )}
+                          onClick={() => focusSearchResult(result)}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="text-sm font-semibold">
+                                <HighlightedText
+                                  text={result.sourceLabel}
+                                  query={deferredSearchQuery}
+                                />
+                              </div>
+                              <div className="mt-1 text-xs uppercase tracking-[0.14em] text-muted-foreground">
+                                <HighlightedText
+                                  text={result.sectionLabel}
+                                  query={deferredSearchQuery}
+                                />
+                              </div>
+                            </div>
+                            <Badge variant="outline">{result.matchCount}</Badge>
+                          </div>
+                          <p className="mt-3 text-sm text-muted-foreground">
+                            <HighlightedText
+                              text={result.preview}
+                              query={deferredSearchQuery}
+                            />
+                          </p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="mt-4 text-sm text-muted-foreground">
+                    No matches found in this chart.
+                  </div>
+                )}
+
+                {searchResults.length > visibleSearchResults.length ? (
+                  <div className="mt-3 text-xs text-muted-foreground">
+                    Showing the first {VISIBLE_SEARCH_RESULT_LIMIT} results. Refine
+                    the search to narrow matches.
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+
           <div ref={chartRef}>
             <ChartSections
               patient={patient}
               activeTab={activeTab}
               onTabChange={setActiveTab}
+              searchQuery={deferredSearchQuery}
+              searchResults={searchResults}
+              searchFocus={searchFocus}
             />
           </div>
         </section>

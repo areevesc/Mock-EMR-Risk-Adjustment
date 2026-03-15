@@ -9,6 +9,14 @@ export type AnnotationType =
   | "Query Needed"
   | "Suspect Condition"
   | "General Note";
+export type ChartTabValue =
+  | "encounters"
+  | "problem-list"
+  | "pmh"
+  | "medications"
+  | "labs"
+  | "vitals"
+  | "imaging";
 export type SourceTab =
   | "Encounters"
   | "Problem List"

@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   Activity,
   ClipboardList,
@@ -8,25 +9,21 @@ import {
   Pill,
   Stethoscope,
 } from "lucide-react";
+import { HighlightedText } from "@/components/highlighted-text";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import type { ChartSearchResult, SearchFocusTarget } from "@/lib/chart-search";
 import { cn } from "@/lib/utils";
-import type { Patient } from "@/types/patient";
-
-type TabValue =
-  | "encounters"
-  | "problem-list"
-  | "pmh"
-  | "medications"
-  | "labs"
-  | "vitals"
-  | "imaging";
+import type { ChartTabValue, Patient } from "@/types/patient";
 
 interface ChartSectionsProps {
   patient: Patient;
-  activeTab: TabValue;
-  onTabChange: (value: TabValue) => void;
+  activeTab: ChartTabValue;
+  onTabChange: (value: ChartTabValue) => void;
+  searchQuery: string;
+  searchResults: ChartSearchResult[];
+  searchFocus: SearchFocusTarget | null;
 }
 
 function formatDate(value: string) {
@@ -55,15 +52,85 @@ const tabs = [
   { value: "labs", label: "Labs", icon: FlaskConical },
   { value: "vitals", label: "Vitals", icon: HeartPulse },
   { value: "imaging", label: "Imaging", icon: ImageIcon },
-] satisfies Array<{ value: TabValue; label: string; icon: typeof Stethoscope }>;
+] satisfies Array<{ value: ChartTabValue; label: string; icon: typeof Stethoscope }>;
+
+function uniqueValues(values: string[]) {
+  return Array.from(new Set(values));
+}
+
+function matchingSourceKeys(searchResults: ChartSearchResult[], tab: ChartTabValue) {
+  return uniqueValues(
+    searchResults
+      .filter((result) => result.tab === tab)
+      .map((result) => result.sourceKey),
+  );
+}
 
 export function ChartSections({
   patient,
   activeTab,
   onTabChange,
+  searchQuery,
+  searchResults,
+  searchFocus,
 }: ChartSectionsProps) {
+  const [openEncounterItems, setOpenEncounterItems] = useState<string[]>([]);
+  const [openLabPanels, setOpenLabPanels] = useState<string[]>([]);
+  const [openImagingReports, setOpenImagingReports] = useState<string[]>([]);
+
+  const encounterValues = uniqueValues([
+    ...openEncounterItems,
+    ...matchingSourceKeys(searchResults, "encounters"),
+    ...(searchFocus?.tab === "encounters" ? [searchFocus.sourceKey] : []),
+  ]);
+  const labValues = uniqueValues([
+    ...openLabPanels,
+    ...matchingSourceKeys(searchResults, "labs"),
+    ...(searchFocus?.tab === "labs" ? [searchFocus.sourceKey] : []),
+  ]);
+  const imagingValues = uniqueValues([
+    ...openImagingReports,
+    ...matchingSourceKeys(searchResults, "imaging"),
+    ...(searchFocus?.tab === "imaging" ? [searchFocus.sourceKey] : []),
+  ]);
+
+  useEffect(() => {
+    if (!searchFocus || activeTab !== searchFocus.tab) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      const element = document.querySelector(
+        `[data-source-type="${searchFocus.sourceType}"][data-source-key="${searchFocus.sourceKey}"]`,
+      ) as HTMLElement | null;
+
+      element?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 120);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    activeTab,
+    searchFocus,
+    encounterValues.join("|"),
+    imagingValues.join("|"),
+    labValues.join("|"),
+  ]);
+
+  function isFocusedSource(sourceType: string, sourceKey: string) {
+    return (
+      searchFocus?.sourceType === sourceType &&
+      searchFocus.sourceKey === sourceKey
+    );
+  }
+
   return (
-    <Tabs value={activeTab} onValueChange={(value) => onTabChange(value as TabValue)}>
+    <Tabs
+      value={activeTab}
+      onValueChange={(value) => onTabChange(value as ChartTabValue)}
+    >
       <div className="overflow-x-auto pb-2 scrollbar-thin">
         <TabsList className="min-w-max">
           {tabs.map((tab) => {
@@ -83,7 +150,12 @@ export function ChartSections({
       </div>
 
       <TabsContent value="encounters">
-        <Accordion type="multiple" className="border-t border-border/70">
+        <Accordion
+          type="multiple"
+          value={encounterValues}
+          onValueChange={setOpenEncounterItems}
+          className="border-t border-border/70"
+        >
           {patient.encounters.map((encounter) => (
             <AccordionItem
               key={encounter.id}
@@ -97,10 +169,13 @@ export function ChartSections({
                       {formatDate(encounter.date)}
                     </div>
                     <div className="text-sm text-muted-foreground">
-                      {encounter.type} · {encounter.provider}
+                      <HighlightedText text={encounter.type} query={searchQuery} /> ·{" "}
+                      <HighlightedText text={encounter.provider} query={searchQuery} />
                     </div>
                   </div>
-                  <Badge variant="secondary">{encounter.billingCode}</Badge>
+                  <Badge variant="secondary">
+                    <HighlightedText text={encounter.billingCode} query={searchQuery} />
+                  </Badge>
                 </div>
               </AccordionTrigger>
               <AccordionContent>
@@ -109,20 +184,27 @@ export function ChartSections({
                   data-source-type="encounter"
                   data-source-key={encounter.id}
                   data-source-label={`Encounters - ${formatDate(encounter.date)}`}
-                  className="space-y-6 pb-2 text-sm"
+                  className={cn(
+                    "scroll-mt-24 space-y-6 pb-2 text-sm transition-colors",
+                    isFocusedSource("encounter", encounter.id) && "rounded-2xl bg-primary/5 p-3",
+                  )}
                 >
                   <section>
                     <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                       Chief Complaint
                     </h3>
-                    <p className="mt-3">{encounter.chiefComplaint}</p>
+                    <p className="mt-3">
+                      <HighlightedText text={encounter.chiefComplaint} query={searchQuery} />
+                    </p>
                   </section>
 
                   <section className="border-t border-border/60 pt-4">
                     <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                       History of Present Illness
                     </h3>
-                    <p className="mt-3">{encounter.hpi}</p>
+                    <p className="mt-3">
+                      <HighlightedText text={encounter.hpi} query={searchQuery} />
+                    </p>
                   </section>
 
                   <section className="border-t border-border/60 pt-4">
@@ -131,7 +213,9 @@ export function ChartSections({
                     </h3>
                     <ul className="mt-3 space-y-1">
                       {encounter.reviewOfSystems.map((item) => (
-                        <li key={item}>{item}</li>
+                        <li key={item}>
+                          <HighlightedText text={item} query={searchQuery} />
+                        </li>
                       ))}
                     </ul>
                   </section>
@@ -141,12 +225,42 @@ export function ChartSections({
                       Vitals
                     </h3>
                     <div className="mt-3 grid gap-x-4 gap-y-2 sm:grid-cols-3 lg:grid-cols-6">
-                      <div>BP {encounter.vitals.systolic}/{encounter.vitals.diastolic}</div>
-                      <div>HR {encounter.vitals.heartRate}</div>
-                      <div>Temp {encounter.vitals.temperature}F</div>
-                      <div>Wt {encounter.vitals.weight} lb</div>
-                      <div>BMI {encounter.vitals.bmi}</div>
-                      <div>O2 {encounter.vitals.oxygenSaturation}%</div>
+                      <div>
+                        <HighlightedText
+                          text={`BP ${encounter.vitals.systolic}/${encounter.vitals.diastolic}`}
+                          query={searchQuery}
+                        />
+                      </div>
+                      <div>
+                        <HighlightedText
+                          text={`HR ${encounter.vitals.heartRate}`}
+                          query={searchQuery}
+                        />
+                      </div>
+                      <div>
+                        <HighlightedText
+                          text={`Temp ${encounter.vitals.temperature}F`}
+                          query={searchQuery}
+                        />
+                      </div>
+                      <div>
+                        <HighlightedText
+                          text={`Wt ${encounter.vitals.weight} lb`}
+                          query={searchQuery}
+                        />
+                      </div>
+                      <div>
+                        <HighlightedText
+                          text={`BMI ${encounter.vitals.bmi}`}
+                          query={searchQuery}
+                        />
+                      </div>
+                      <div>
+                        <HighlightedText
+                          text={`O2 ${encounter.vitals.oxygenSaturation}%`}
+                          query={searchQuery}
+                        />
+                      </div>
                     </div>
                   </section>
 
@@ -158,9 +272,11 @@ export function ChartSections({
                       {encounter.physicalExam.map((item) => (
                         <div key={`${encounter.id}-${item.system}`} className="space-y-1">
                           <div className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                            {item.system}
+                            <HighlightedText text={item.system} query={searchQuery} />
                           </div>
-                          <div className="mt-1">{item.text}</div>
+                          <div className="mt-1">
+                            <HighlightedText text={item.text} query={searchQuery} />
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -174,9 +290,12 @@ export function ChartSections({
                       {encounter.assessmentPlan.map((plan, index) => (
                         <li key={plan.id} className="space-y-1">
                           <div className="font-semibold">
-                            {index + 1}. {plan.problem}
+                            {index + 1}.{" "}
+                            <HighlightedText text={plan.problem} query={searchQuery} />
                           </div>
-                          <div className="mt-1 text-muted-foreground">{plan.detail}</div>
+                          <div className="mt-1 text-muted-foreground">
+                            <HighlightedText text={plan.detail} query={searchQuery} />
+                          </div>
                         </li>
                       ))}
                     </ol>
@@ -184,10 +303,15 @@ export function ChartSections({
 
                   <footer className="space-y-1 pt-2 text-xs text-muted-foreground">
                     <div>
-                      Electronically signed by {encounter.provider} on{" "}
-                      {formatDate(encounter.date)} at {encounter.signatureTime}
+                      Electronically signed by{" "}
+                      <HighlightedText text={encounter.provider} query={searchQuery} /> on{" "}
+                      {formatDate(encounter.date)} at{" "}
+                      <HighlightedText text={encounter.signatureTime} query={searchQuery} />
                     </div>
-                    <div>Billing Code: {encounter.billingCode}</div>
+                    <div>
+                      Billing Code:{" "}
+                      <HighlightedText text={encounter.billingCode} query={searchQuery} />
+                    </div>
                   </footer>
                 </article>
               </AccordionContent>
@@ -214,11 +338,20 @@ export function ChartSections({
                   data-source-type="problem"
                   data-source-key={problem.id}
                   data-source-label={`Problem List - ${problem.diagnosis}`}
-                  className="border-b border-border/70"
+                  className={cn(
+                    "scroll-mt-24 border-b border-border/70",
+                    isFocusedSource("problem", problem.id) && "bg-primary/5",
+                  )}
                 >
-                  <td className="px-4 py-3 font-medium">{problem.diagnosis}</td>
-                  <td className="px-4 py-3 font-mono text-xs">{problem.code}</td>
-                  <td className="px-4 py-3">{formatDate(problem.dateAdded)}</td>
+                  <td className="px-4 py-3 font-medium">
+                    <HighlightedText text={problem.diagnosis} query={searchQuery} />
+                  </td>
+                  <td className="px-4 py-3 font-mono text-xs">
+                    <HighlightedText text={problem.code} query={searchQuery} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <HighlightedText text={formatDate(problem.dateAdded)} query={searchQuery} />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -235,9 +368,14 @@ export function ChartSections({
               data-source-type="pmh"
               data-source-key={String(index)}
               data-source-label={`Past Medical Hx - ${item}`}
-              className="py-4"
+              className={cn(
+                "scroll-mt-24 py-4",
+                isFocusedSource("pmh", String(index)) && "rounded-xl bg-primary/5 px-3",
+              )}
             >
-              <span>{item}</span>
+              <span>
+                <HighlightedText text={item} query={searchQuery} />
+              </span>
             </li>
           ))}
         </ul>
@@ -263,15 +401,28 @@ export function ChartSections({
                   data-source-type="medication"
                   data-source-key={medication.id}
                   data-source-label={`Medications - ${medication.name}`}
-                  className="border-b border-border/70"
+                  className={cn(
+                    "scroll-mt-24 border-b border-border/70",
+                    isFocusedSource("medication", medication.id) && "bg-primary/5",
+                  )}
                 >
                   <td className="px-4 py-3">
-                    <div className="font-medium">{medication.name}</div>
+                    <div className="font-medium">
+                      <HighlightedText text={medication.name} query={searchQuery} />
+                    </div>
                   </td>
-                  <td className="px-4 py-3">{medication.dose}</td>
-                  <td className="px-4 py-3">{medication.frequency}</td>
-                  <td className="px-4 py-3">{medication.route}</td>
-                  <td className="px-4 py-3">{medication.prescriber}</td>
+                  <td className="px-4 py-3">
+                    <HighlightedText text={medication.dose} query={searchQuery} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <HighlightedText text={medication.frequency} query={searchQuery} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <HighlightedText text={medication.route} query={searchQuery} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <HighlightedText text={medication.prescriber} query={searchQuery} />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -280,7 +431,12 @@ export function ChartSections({
       </TabsContent>
 
       <TabsContent value="labs">
-        <Accordion type="multiple" className="border-t border-border/70">
+        <Accordion
+          type="multiple"
+          value={labValues}
+          onValueChange={setOpenLabPanels}
+          className="border-t border-border/70"
+        >
           {patient.labs.map((panel) => (
             <AccordionItem
               key={panel.id}
@@ -290,9 +446,11 @@ export function ChartSections({
               <AccordionTrigger className="py-4">
                 <div className="flex w-full items-center justify-between gap-3">
                   <div>
-                    <div className="font-semibold">{panel.name}</div>
+                    <div className="font-semibold">
+                      <HighlightedText text={panel.name} query={searchQuery} />
+                    </div>
                     <div className="text-sm text-muted-foreground">
-                      {formatDate(panel.date)}
+                      <HighlightedText text={formatDate(panel.date)} query={searchQuery} />
                     </div>
                   </div>
                   <FlaskConical className="h-4 w-4 text-primary" />
@@ -304,7 +462,10 @@ export function ChartSections({
                   data-source-type="lab-panel"
                   data-source-key={panel.id}
                   data-source-label={`Labs - ${panel.name} - ${formatDate(panel.date)}`}
-                  className="overflow-x-auto scrollbar-thin"
+                  className={cn(
+                    "scroll-mt-24 overflow-x-auto scrollbar-thin",
+                    isFocusedSource("lab-panel", panel.id) && "rounded-2xl bg-primary/5 p-3",
+                  )}
                 >
                   <table className="min-w-full text-sm">
                     <thead className="border-b border-border/70 text-left text-muted-foreground">
@@ -318,13 +479,20 @@ export function ChartSections({
                     <tbody>
                       {panel.results.map((result) => (
                         <tr key={result.id} className="border-b border-border/70">
-                          <td className="px-3 py-2">{result.component}</td>
-                          <td className={cn("px-3 py-2 font-semibold", flagClass(result.flag))}>
-                            {result.value} {result.unit}
+                          <td className="px-3 py-2">
+                            <HighlightedText text={result.component} query={searchQuery} />
                           </td>
-                          <td className="px-3 py-2">{result.referenceRange}</td>
+                          <td className={cn("px-3 py-2 font-semibold", flagClass(result.flag))}>
+                            <HighlightedText
+                              text={`${result.value} ${result.unit}`.trim()}
+                              query={searchQuery}
+                            />
+                          </td>
+                          <td className="px-3 py-2">
+                            <HighlightedText text={result.referenceRange} query={searchQuery} />
+                          </td>
                           <td className={cn("px-3 py-2 uppercase tracking-[0.14em]", flagClass(result.flag))}>
-                            {result.flag}
+                            <HighlightedText text={result.flag} query={searchQuery} />
                           </td>
                         </tr>
                       ))}
@@ -360,16 +528,41 @@ export function ChartSections({
                   data-source-type="vital"
                   data-source-key={vital.id}
                   data-source-label={`Vitals - ${formatDate(vital.date)}`}
-                  className="border-b border-border/70"
+                  className={cn(
+                    "scroll-mt-24 border-b border-border/70",
+                    isFocusedSource("vital", vital.id) && "bg-primary/5",
+                  )}
                 >
-                  <td className="px-4 py-3">{formatDate(vital.date)}</td>
-                  <td className="px-4 py-3">{vital.systolic}/{vital.diastolic}</td>
-                  <td className="px-4 py-3">{vital.heartRate}</td>
-                  <td className="px-4 py-3">{vital.temperature}F</td>
-                  <td className="px-4 py-3">{vital.weight} lb</td>
-                  <td className="px-4 py-3">{vital.height} in</td>
-                  <td className="px-4 py-3">{vital.bmi}</td>
-                  <td className="px-4 py-3">{vital.oxygenSaturation}%</td>
+                  <td className="px-4 py-3">
+                    <HighlightedText text={formatDate(vital.date)} query={searchQuery} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <HighlightedText
+                      text={`${vital.systolic}/${vital.diastolic}`}
+                      query={searchQuery}
+                    />
+                  </td>
+                  <td className="px-4 py-3">
+                    <HighlightedText text={vital.heartRate} query={searchQuery} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <HighlightedText text={`${vital.temperature}F`} query={searchQuery} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <HighlightedText text={`${vital.weight} lb`} query={searchQuery} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <HighlightedText text={`${vital.height} in`} query={searchQuery} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <HighlightedText text={vital.bmi} query={searchQuery} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <HighlightedText
+                      text={`${vital.oxygenSaturation}%`}
+                      query={searchQuery}
+                    />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -378,7 +571,12 @@ export function ChartSections({
       </TabsContent>
 
       <TabsContent value="imaging">
-        <Accordion type="multiple" className="border-t border-border/70">
+        <Accordion
+          type="multiple"
+          value={imagingValues}
+          onValueChange={setOpenImagingReports}
+          className="border-t border-border/70"
+        >
           {patient.imaging.map((report) => (
             <AccordionItem
               key={report.id}
@@ -388,9 +586,12 @@ export function ChartSections({
               <AccordionTrigger className="py-4">
                 <div className="flex w-full items-center justify-between gap-3">
                   <div>
-                    <div className="font-semibold">{report.type}</div>
+                    <div className="font-semibold">
+                      <HighlightedText text={report.type} query={searchQuery} />
+                    </div>
                     <div className="text-sm text-muted-foreground">
-                      {formatDate(report.date)} · {report.indication}
+                      <HighlightedText text={formatDate(report.date)} query={searchQuery} /> ·{" "}
+                      <HighlightedText text={report.indication} query={searchQuery} />
                     </div>
                   </div>
                   <Activity className="h-4 w-4 text-primary" />
@@ -402,19 +603,26 @@ export function ChartSections({
                   data-source-type="imaging"
                   data-source-key={report.id}
                   data-source-label={`Imaging - ${report.type} - ${formatDate(report.date)}`}
-                  className="space-y-4 pb-2 text-sm"
+                  className={cn(
+                    "scroll-mt-24 space-y-4 pb-2 text-sm transition-colors",
+                    isFocusedSource("imaging", report.id) && "rounded-2xl bg-primary/5 p-3",
+                  )}
                 >
                   <div>
                     <div className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                       Indication
                     </div>
-                    <div className="mt-1">{report.indication}</div>
+                    <div className="mt-1">
+                      <HighlightedText text={report.indication} query={searchQuery} />
+                    </div>
                   </div>
                   <div className="border-t border-border/60 pt-4">
                     <div className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                       Findings
                     </div>
-                    <p className="mt-1 leading-6">{report.findings}</p>
+                    <p className="mt-1 leading-6">
+                      <HighlightedText text={report.findings} query={searchQuery} />
+                    </p>
                   </div>
                   <div className="border-t border-border/60 pt-4">
                     <div className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
@@ -422,7 +630,9 @@ export function ChartSections({
                     </div>
                     <ol className="mt-2 space-y-2">
                       {report.impression.map((line) => (
-                        <li key={line}>{line}</li>
+                        <li key={line}>
+                          <HighlightedText text={line} query={searchQuery} />
+                        </li>
                       ))}
                     </ol>
                   </div>
