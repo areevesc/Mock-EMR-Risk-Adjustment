@@ -532,9 +532,9 @@ export default function App() {
             </Badge>
           </Button>
         </DrawerTrigger>
-        <DrawerContent className="max-h-[88vh] p-0">
+        <DrawerContent className="flex h-[88dvh] max-h-[88dvh] flex-col p-0">
           <DrawerTitle className="sr-only">Coding Worksheet</DrawerTitle>
-          <div className="max-h-[80vh] overflow-hidden">{worksheet}</div>
+          <div className="min-h-0 flex-1 overflow-hidden">{worksheet}</div>
         </DrawerContent>
       </Drawer>
 

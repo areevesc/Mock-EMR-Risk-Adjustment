@@ -146,7 +146,7 @@ export function Worksheet({
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       <div className="border-b border-border/70 px-4 py-4">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -186,7 +186,7 @@ export function Worksheet({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-4 scrollbar-thin">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 pb-[calc(env(safe-area-inset-bottom)+2rem)] scrollbar-thin">
         {annotations.length === 0 ? (
           <div className="border-t border-dashed border-border pt-5 text-sm text-muted-foreground">
             Create an annotation, then use text highlighting in the chart to capture a diagnosis or supporting evidence.
