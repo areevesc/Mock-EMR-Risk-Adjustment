@@ -171,6 +171,8 @@ export default function App() {
   const deferredSearchQuery = useDeferredValue(normalizeSearchQuery(searchQuery));
   const searchResults = buildSearchResults(patient, deferredSearchQuery);
   const visibleSearchResults = searchResults.slice(0, VISIBLE_SEARCH_RESULT_LIMIT);
+  const isMobileViewport = typeof window !== "undefined" && window.innerWidth < 640;
+  const showCaptureBanner = Boolean(captureTarget && (!selectionState || !isMobileViewport));
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
@@ -685,9 +687,28 @@ export default function App() {
         </section>
       </main>
 
-      {captureTarget ? (
-        <div className="fixed bottom-4 left-1/2 z-50 w-[min(92vw,680px)] -translate-x-1/2 rounded-full border border-primary/30 bg-card px-4 py-3 shadow-panel">
-          <div className="flex items-center justify-between gap-3">
+      {captureTarget && showCaptureBanner ? (
+        <div
+          className={cn(
+            "fixed z-50 border border-primary/30 bg-card px-4 py-3 shadow-panel",
+            isMobileViewport
+              ? "inset-x-3 bottom-3 rounded-3xl"
+              : "bottom-4 left-1/2 w-[min(92vw,680px)] -translate-x-1/2 rounded-full",
+          )}
+          style={
+            isMobileViewport
+              ? { bottom: "calc(env(safe-area-inset-bottom) + 12px)" }
+              : undefined
+          }
+        >
+          <div
+            className={cn(
+              "flex gap-3",
+              isMobileViewport
+                ? "items-start justify-between"
+                : "items-center justify-between",
+            )}
+          >
             <div className="text-sm">
               {captureTarget.field === "diagnosis"
                 ? "Select a diagnosis - highlight text in the chart"
@@ -709,15 +730,22 @@ export default function App() {
 
       {selectionState ? (
         <div
-          className="fixed z-[60] rounded-2xl border border-border bg-card p-3 shadow-panel"
-          style={{
-            top: selectionState.top,
-            left: selectionState.left,
-            width:
-              typeof window === "undefined"
-                ? 320
-                : Math.min(320, window.innerWidth - 24),
-          }}
+          className={cn(
+            "fixed z-[60] rounded-2xl border border-border bg-card p-3 shadow-panel",
+            isMobileViewport ? "inset-x-3" : "",
+          )}
+          style={
+            isMobileViewport
+              ? { bottom: "calc(env(safe-area-inset-bottom) + 12px)" }
+              : {
+                  top: selectionState.top,
+                  left: selectionState.left,
+                  width:
+                    typeof window === "undefined"
+                      ? 320
+                      : Math.min(320, window.innerWidth - 24),
+                }
+          }
         >
           <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
             {selectionState.sourceLabel}
