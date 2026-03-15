@@ -172,7 +172,60 @@ export default function App() {
   const searchResults = buildSearchResults(patient, deferredSearchQuery);
   const visibleSearchResults = searchResults.slice(0, VISIBLE_SEARCH_RESULT_LIMIT);
   const isMobileViewport = typeof window !== "undefined" && window.innerWidth < 640;
-  const showCaptureBanner = Boolean(captureTarget && (!selectionState || !isMobileViewport));
+  const showDesktopCaptureBanner = Boolean(captureTarget && !isMobileViewport && !selectionState);
+
+  function extractSelection() {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      return null;
+    }
+
+    const text = selection.toString().replace(/\s+/g, " ").trim();
+    if (!text) {
+      return null;
+    }
+
+    const range = selection.getRangeAt(0);
+    const anchor =
+      range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+        ? (range.commonAncestorContainer as HTMLElement)
+        : range.commonAncestorContainer.parentElement;
+
+    if (!anchor || !chartRef.current?.contains(anchor)) {
+      return null;
+    }
+
+    const sourceElement = anchor.closest("[data-source-tab]") as HTMLElement | null;
+    if (!sourceElement) {
+      return null;
+    }
+
+    const rect = range.getBoundingClientRect();
+    const firstRect = range.getClientRects()[0];
+    const resolvedRect =
+      rect.width === 0 && rect.height === 0 && firstRect ? firstRect : rect;
+
+    if (resolvedRect.width === 0 && resolvedRect.height === 0) {
+      return null;
+    }
+
+    const width = Math.min(320, window.innerWidth - 24);
+    const left = Math.min(
+      Math.max(12, resolvedRect.left + resolvedRect.width / 2 - width / 2),
+      window.innerWidth - width - 12,
+    );
+    const top = Math.max(12, resolvedRect.top - (window.innerWidth < 640 ? 72 : 58));
+
+    return {
+      text,
+      top,
+      left,
+      sourceTab: (sourceElement.dataset.sourceTab ?? "Encounters") as SourceTab,
+      sourceType: sourceElement.dataset.sourceType ?? "chart",
+      sourceKey: sourceElement.dataset.sourceKey ?? text.slice(0, 24),
+      sourceLabel: sourceElement.dataset.sourceLabel ?? "Chart",
+    } satisfies SelectionState;
+  }
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
@@ -221,61 +274,19 @@ export default function App() {
       return;
     }
 
-    const extractSelection = () => {
-      const selection = window.getSelection();
-      if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
-        return null;
+    const scheduleFinalizeSelection = (delay: number, attempts = 1) => {
+      if (mobileSelectionTimerRef.current) {
+        window.clearTimeout(mobileSelectionTimerRef.current);
       }
 
-      const text = selection.toString().replace(/\s+/g, " ").trim();
-      if (!text) {
-        return null;
-      }
+      mobileSelectionTimerRef.current = window.setTimeout(() => {
+        const nextSelection = extractSelection();
+        setSelectionState(nextSelection);
 
-      const range = selection.getRangeAt(0);
-      const anchor =
-        range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
-          ? (range.commonAncestorContainer as HTMLElement)
-          : range.commonAncestorContainer.parentElement;
-
-      if (!anchor || !chartRef.current?.contains(anchor)) {
-        return null;
-      }
-
-      const sourceElement = anchor.closest("[data-source-tab]") as HTMLElement | null;
-      if (!sourceElement) {
-        return null;
-      }
-
-      const rect = range.getBoundingClientRect();
-      if (rect.width === 0 && rect.height === 0) {
-        return null;
-      }
-
-      const isMobile = window.innerWidth < 640;
-      const width = Math.min(320, window.innerWidth - 24);
-      const left = Math.min(
-        Math.max(12, rect.left + rect.width / 2 - width / 2),
-        window.innerWidth - width - 12,
-      );
-      const top = Math.max(12, rect.top - (isMobile ? 72 : 58));
-
-      return {
-        text,
-        top,
-        left,
-        sourceTab: (sourceElement.dataset.sourceTab ?? "Encounters") as SourceTab,
-        sourceType: sourceElement.dataset.sourceType ?? "chart",
-        sourceKey: sourceElement.dataset.sourceKey ?? text.slice(0, 24),
-        sourceLabel: sourceElement.dataset.sourceLabel ?? "Chart",
-      } satisfies SelectionState;
-    };
-
-    const finalizeSelection = () => {
-      if (!captureTarget) {
-        return;
-      }
-      setSelectionState(extractSelection());
+        if (!nextSelection && attempts > 1) {
+          scheduleFinalizeSelection(160, attempts - 1);
+        }
+      }, delay);
     };
 
     const handleSelectionStart = (event: Event) => {
@@ -289,21 +300,15 @@ export default function App() {
 
     const handleSelectionEnd = () => {
       isSelectingRef.current = false;
-      window.setTimeout(finalizeSelection, 0);
+      scheduleFinalizeSelection(window.innerWidth < 640 ? 220 : 0, window.innerWidth < 640 ? 3 : 1);
     };
 
     const handleSelectionChange = () => {
-      if (window.innerWidth >= 640 || isSelectingRef.current) {
+      if (window.innerWidth >= 640 && isSelectingRef.current) {
         return;
       }
 
-      if (mobileSelectionTimerRef.current) {
-        window.clearTimeout(mobileSelectionTimerRef.current);
-      }
-
-      mobileSelectionTimerRef.current = window.setTimeout(() => {
-        finalizeSelection();
-      }, 180);
+      scheduleFinalizeSelection(window.innerWidth < 640 ? 220 : 180, window.innerWidth < 640 ? 3 : 1);
     };
 
     const hideToolbar = () => {
@@ -370,11 +375,16 @@ export default function App() {
   }
 
   function confirmSelection() {
-    if (!captureTarget || !selectionState) {
+    if (!captureTarget) {
       return;
     }
 
-    const snippet = buildSnippet(selectionState);
+    const nextSelection = selectionState ?? extractSelection();
+    if (!nextSelection) {
+      return;
+    }
+
+    const snippet = buildSnippet(nextSelection);
     updateAnnotation(captureTarget.annotationId, (annotation) => {
       if (captureTarget.field === "diagnosis") {
         return {
@@ -687,28 +697,51 @@ export default function App() {
         </section>
       </main>
 
-      {captureTarget && showCaptureBanner ? (
+      {captureTarget && isMobileViewport ? (
         <div
-          className={cn(
-            "fixed z-50 border border-primary/30 bg-card px-4 py-3 shadow-panel",
-            isMobileViewport
-              ? "inset-x-3 bottom-3 rounded-3xl"
-              : "bottom-4 left-1/2 w-[min(92vw,680px)] -translate-x-1/2 rounded-full",
-          )}
-          style={
-            isMobileViewport
-              ? { bottom: "calc(env(safe-area-inset-bottom) + 12px)" }
-              : undefined
-          }
+          className="fixed inset-x-3 z-50 rounded-3xl border border-primary/30 bg-card px-4 py-4 shadow-panel"
+          style={{ bottom: "calc(env(safe-area-inset-bottom) + 12px)" }}
         >
-          <div
-            className={cn(
-              "flex gap-3",
-              isMobileViewport
-                ? "items-start justify-between"
-                : "items-center justify-between",
-            )}
-          >
+          <div className="text-sm font-medium">
+            {captureTarget.field === "diagnosis"
+              ? "Select a diagnosis"
+              : "Add evidence"}
+          </div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            Highlight text in the chart, then tap{" "}
+            {captureTarget.field === "diagnosis" ? "Select Highlight" : "Add Evidence"}.
+          </div>
+          {selectionState ? (
+            <>
+              <div className="mt-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                {selectionState.sourceLabel}
+              </div>
+              <div className="mt-2 max-h-16 overflow-hidden text-sm leading-5">
+                {selectionState.text}
+              </div>
+            </>
+          ) : null}
+          <div className="mt-4 flex gap-2">
+            <Button
+              variant="outline"
+              className="min-h-11 flex-1"
+              onClick={() => {
+                setCaptureTarget(null);
+                clearSelection();
+              }}
+            >
+              Cancel
+            </Button>
+            <Button className="min-h-11 flex-1" onClick={confirmSelection}>
+              {captureTarget.field === "diagnosis" ? "Select Highlight" : "Add Evidence"}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {captureTarget && showDesktopCaptureBanner ? (
+        <div className="fixed bottom-4 left-1/2 z-50 w-[min(92vw,680px)] -translate-x-1/2 rounded-full border border-primary/30 bg-card px-4 py-3 shadow-panel">
+          <div className="flex items-center justify-between gap-3">
             <div className="text-sm">
               {captureTarget.field === "diagnosis"
                 ? "Select a diagnosis - highlight text in the chart"
@@ -728,24 +761,17 @@ export default function App() {
         </div>
       ) : null}
 
-      {selectionState ? (
+      {!isMobileViewport && selectionState ? (
         <div
-          className={cn(
-            "fixed z-[60] rounded-2xl border border-border bg-card p-3 shadow-panel",
-            isMobileViewport ? "inset-x-3" : "",
-          )}
-          style={
-            isMobileViewport
-              ? { bottom: "calc(env(safe-area-inset-bottom) + 12px)" }
-              : {
-                  top: selectionState.top,
-                  left: selectionState.left,
-                  width:
-                    typeof window === "undefined"
-                      ? 320
-                      : Math.min(320, window.innerWidth - 24),
-                }
-          }
+          className="fixed z-[60] rounded-2xl border border-border bg-card p-3 shadow-panel"
+          style={{
+            top: selectionState.top,
+            left: selectionState.left,
+            width:
+              typeof window === "undefined"
+                ? 320
+                : Math.min(320, window.innerWidth - 24),
+          }}
         >
           <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
             {selectionState.sourceLabel}
